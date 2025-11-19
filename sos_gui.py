@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
-from SosGame import SimpleGame, GeneralGame
+from SosGame import SimpleGame, GeneralGame, HumanPlayer, ComputerPlayer
 
 class SOSGUI:
     def __init__(self, root):
@@ -10,6 +10,7 @@ class SOSGUI:
         self.cell_size = 100
         self.canvas_size = 300
         self.board_size = 3
+        self.is_processing_move = False
 
         self.options_frame = tk.Frame(root)
         self.options_frame.pack(pady=5)
@@ -30,6 +31,11 @@ class SOSGUI:
         self.blue_player_frame = tk.Frame(self.players_frame, padx=10, pady=5)
         self.blue_player_frame.pack(side=tk.LEFT, padx=20)
         tk.Label(self.blue_player_frame, text="Blue player", fg="blue").pack()
+        
+        self.blue_player_type_var = tk.StringVar(value="human")
+        tk.Radiobutton(self.blue_player_frame, text="Human", variable=self.blue_player_type_var, value="human", command=self.start_new_game).pack(anchor=tk.W)
+        tk.Radiobutton(self.blue_player_frame, text="Computer", variable=self.blue_player_type_var, value="computer", command=self.start_new_game).pack(anchor=tk.W)
+        
         self.blue_piece_var = tk.StringVar(value="S")
         tk.Radiobutton(self.blue_player_frame, text="S", variable=self.blue_piece_var, value="S").pack(anchor=tk.W)
         tk.Radiobutton(self.blue_player_frame, text="O", variable=self.blue_piece_var, value="O").pack(anchor=tk.W)
@@ -39,6 +45,11 @@ class SOSGUI:
         self.red_player_frame = tk.Frame(self.players_frame, padx=10, pady=5)
         self.red_player_frame.pack(side=tk.RIGHT, padx=20)
         tk.Label(self.red_player_frame, text="Red player", fg="red").pack()
+        
+        self.red_player_type_var = tk.StringVar(value="human")
+        tk.Radiobutton(self.red_player_frame, text="Human", variable=self.red_player_type_var, value="human", command=self.start_new_game).pack(anchor=tk.W)
+        tk.Radiobutton(self.red_player_frame, text="Computer", variable=self.red_player_type_var, value="computer", command=self.start_new_game).pack(anchor=tk.W)
+        
         self.red_piece_var = tk.StringVar(value="S")
         tk.Radiobutton(self.red_player_frame, text="S", variable=self.red_piece_var, value="S").pack(anchor=tk.W)
         tk.Radiobutton(self.red_player_frame, text="O", variable=self.red_piece_var, value="O").pack(anchor=tk.W)
@@ -61,24 +72,62 @@ class SOSGUI:
         self.start_new_game()
 
     def on_canvas_click(self, event):
-        if self.game is None or self.game.game_over:
+        if self.game is None or self.game.game_over or self.is_processing_move:
             return
 
-        col = int(event.x // self.cell_size)
-        row = int(event.y // self.cell_size)
-
-        player_making_move = self.game.get_turn_owner_name()
-        piece = self.blue_piece_var.get() if player_making_move == "Blue" else self.red_piece_var.get()
-
-        soses_found, move_made = self.game.make_move(row, col, piece)
-
-        if move_made:
-            self.draw_piece(row, col, piece)
-            if soses_found:
-                self.draw_sos_lines(soses_found, player_making_move.lower())
+        current_player = self.game.get_current_player()
+        if isinstance(current_player, HumanPlayer):
+            col = int(event.x // self.cell_size)
+            row = int(event.y // self.cell_size)
             
-            self.update_game_status()
-            self.check_for_game_over()
+            piece = self.blue_piece_var.get() if self.game.current_turn_is_blue else self.red_piece_var.get()
+            
+            soses_found, move_made = self.game.make_move(row, col, piece)
+
+            if move_made:
+                self.handle_move_result(row, col, piece, soses_found)
+                self.handle_turn()
+
+    def handle_move_result(self, row, col, piece, soses_found):
+        self.draw_piece(row, col, piece)
+        if soses_found:
+            player_name = self.game.get_turn_owner_name() 
+            self.draw_sos_lines(soses_found, player_name.lower())
+        
+        self.update_game_status()
+        self.check_for_game_over()
+        
+    def handle_computer_move(self):
+        if self.game.game_over:
+            return
+
+        current_player = self.game.get_current_player()
+        if isinstance(current_player, ComputerPlayer):
+            self.is_processing_move = True
+            
+            r, c, piece = current_player.get_move(self.game)
+            
+            if r is not None:
+                soses_found, move_made = self.game.make_move(r, c, piece)
+                if move_made:
+                    self.handle_move_result(r, c, piece, soses_found)
+                    self.root.after(500, self.handle_turn)
+                else:
+                    self.is_processing_move = False
+            else:
+                self.is_processing_move = False
+
+    def handle_turn(self):
+        if self.game.game_over:
+            self.is_processing_move = False
+            return
+            
+        current_player = self.game.get_current_player()
+        
+        if isinstance(current_player, ComputerPlayer):
+            self.handle_computer_move()
+        else:
+            self.is_processing_move = False
             
     def draw_piece(self, row, col, piece):
         x = col * self.cell_size + self.cell_size / 2
@@ -95,15 +144,25 @@ class SOSGUI:
 
     def draw_board(self):
         self.canvas.delete("all")
-        self.canvas_size = min(max(self.board_size * 30, 200), 500) 
+        self.canvas_size = max(min(self.root.winfo_height() - 200, self.root.winfo_width() - 50, self.board_size * 50), 200)
         self.cell_size = self.canvas_size / self.board_size
         self.canvas.config(width=self.canvas_size, height=self.canvas_size)
 
         for i in range(1, self.board_size):
             self.canvas.create_line(i * self.cell_size, 0, i * self.cell_size, self.canvas_size)
             self.canvas.create_line(0, i * self.cell_size, self.canvas_size, i * self.cell_size)
+        
+        if self.game:
+            for r in range(self.board_size):
+                for c in range(self.board_size):
+                    piece = self.game.board[r][c]
+                    if piece:
+                        self.draw_piece(r, c, piece)
 
     def start_new_game(self):
+        if self.is_processing_move:
+            return
+
         try:
             size = int(self.board_size_var.get())
             if size < 3:
@@ -116,20 +175,37 @@ class SOSGUI:
             self.board_size_var.set(str(self.board_size))
             return
         
+        blue_type = self.blue_player_type_var.get()
+        red_type = self.red_player_type_var.get()
+        blue_piece_choice = self.blue_piece_var.get()
+        red_piece_choice = self.red_piece_var.get()
+        
+        if blue_type == "human":
+            blue_player = HumanPlayer("Blue", blue_piece_choice)
+        else:
+            blue_player = ComputerPlayer("Blue", blue_piece_choice)
+
+        if red_type == "human":
+            red_player = HumanPlayer("Red", red_piece_choice)
+        else:
+            red_player = ComputerPlayer("Red", red_piece_choice)
+        
         mode = self.game_mode_var.get()
         if mode == "simple":
-            self.game = SimpleGame(self.board_size)
+            self.game = SimpleGame(self.board_size, blue_player, red_player)
         else:
-            self.game = GeneralGame(self.board_size)
+            self.game = GeneralGame(self.board_size, blue_player, red_player)
             
         self.draw_board()
         self.update_game_status()
+        self.handle_turn()
 
     def update_game_status(self):
         if self.game is None:
             return
 
-        self.turn_label.config(text=f"Current turn: {self.game.get_turn_owner_name()}")
+        player_name = self.game.get_turn_owner_name()
+        self.turn_label.config(text=f"Current turn: {player_name}")
 
         if isinstance(self.game, GeneralGame):
             self.blue_score_label.config(text=f"Score: {self.game.blue_score}")
@@ -146,3 +222,4 @@ class SOSGUI:
             else:
                 message = "It's a draw!"
             messagebox.showinfo("Game Over", message)
+            self.is_processing_move = False
